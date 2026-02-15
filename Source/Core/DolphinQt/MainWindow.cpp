@@ -712,6 +712,7 @@ void MainWindow::ConnectGameList()
 
   connect(m_game_list, &GameList::OpenGeneralSettings, this, &MainWindow::ShowGeneralWindow);
   connect(m_game_list, &GameList::OpenGraphicsSettings, this, &MainWindow::ShowGraphicsWindow);
+  connect(m_game_list, &GameList::RequestStop, this, &MainWindow::RequestStop);
 }
 
 void MainWindow::ConnectRenderWidget()

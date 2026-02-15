@@ -14,6 +14,7 @@ class QLabel;
 class QListView;
 class QSortFilterProxyModel;
 class QTableView;
+class QTimer;
 
 namespace UICommon
 {
@@ -59,6 +60,7 @@ signals:
 #ifdef USE_RETRO_ACHIEVEMENTS
   void OpenAchievementSettings();
 #endif  // USE_RETRO_ACHIEVEMENTS
+  void RequestStop();
 
 private:
   void ShowHeaderContextMenu(const QPoint& pos);
@@ -107,6 +109,20 @@ private:
   QTableView* m_list;
   QLabel* m_empty;
   bool m_prefer_list;
+
+  QTimer* m_gamepad_poll_timer;
+
+  struct GamepadState
+  {
+    bool pad_up = false;
+    bool pad_down = false;
+    bool pad_left = false;
+    bool pad_right = false;
+    bool button_select = false;
+    bool button_guide = false;
+  } m_last_gamepad_state;
+
+  void PollGamepadInput();
 
 protected:
   void keyPressEvent(QKeyEvent* event) override;

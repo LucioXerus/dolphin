@@ -20,8 +20,14 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <set>
 #include <utility>
 
+#include <fmt/format.h>
+
+#include <QCoreApplication>
+#include <QDebug>
 #include <QDesktopServices>
 #include <QDir>
 #include <QErrorMessage>
@@ -38,6 +44,7 @@
 #include <QShortcut>
 #include <QSortFilterProxyModel>
 #include <QTableView>
+#include <QTimer>
 #include <QUrl>
 
 #ifdef _WIN32
@@ -55,6 +62,9 @@
 #include "Core/WiiUtils.h"
 
 #include "DiscIO/Enums.h"
+
+#include "InputCommon/ControllerInterface/ControllerInterface.h"
+#include "InputCommon/ControllerInterface/CoreDevice.h"
 
 #include "DolphinQt/Config/PropertiesDialog.h"
 #include "DolphinQt/ConvertDialog.h"
@@ -171,6 +181,11 @@ GameList::GameList(QWidget* parent) : QStackedWidget(parent), m_model(this)
 
   connect(&Settings::Instance(), &Settings::MetadataRefreshCompleted, this,
           [this] { m_grid_proxy->invalidate(); });
+
+  m_gamepad_poll_timer = new QTimer(this);
+  connect(m_gamepad_poll_timer, &QTimer::timeout, this, &GameList::PollGamepadInput);
+  m_gamepad_poll_timer->setInterval(16);
+  m_gamepad_poll_timer->start();
 }
 
 void GameList::PurgeCache()
@@ -1013,6 +1028,140 @@ void GameList::keyPressEvent(QKeyEvent* event)
   {
     QStackedWidget::keyPressEvent(event);
   }
+}
+
+void GameList::PollGamepadInput()
+{
+  if (!g_controller_interface.IsInit())
+  {
+    static bool warned = false;
+    if (!warned)
+    {
+      qDebug() << "Controller interface not initialized";
+      warned = true;
+    }
+    return;
+  }
+
+  g_controller_interface.UpdateInput();
+
+  std::lock_guard lock(g_controller_interface.GetDevicesMutex());
+
+  auto devices = g_controller_interface.GetAllDevices();
+
+  static bool device_info_printed = false;
+  if (!device_info_printed)
+  {
+    qDebug() << "Number of devices:" << devices.size();
+    for (const auto& device : devices)
+    {
+      qDebug() << "  Device:" << QString::fromStdString(device->GetName())
+               << "Source:" << QString::fromStdString(device->GetSource());
+
+      if (device->GetSource() == "SDL")
+      {
+        const auto& inputs = device->Inputs();
+        qDebug() << "  Number of inputs:" << inputs.size();
+        for (const auto* input : inputs)
+        {
+          qDebug() << "    Input:" << QString::fromStdString(input->GetName());
+        }
+      }
+    }
+    device_info_printed = true;
+  }
+
+  GamepadState current_state;
+
+  for (const auto& device : devices)
+  {
+    if (device->GetSource() != "SDL")
+      continue;
+
+    const auto& inputs = device->Inputs();
+    for (const auto* input : inputs)
+    {
+      const std::string& name = input->GetName();
+      ControlState state = input->GetState();
+      bool pressed = state > 0.5;
+
+      if (pressed)
+      {
+        fprintf(stderr, "[GAMEPAD] Button pressed: %s (state: %.2f)\n", name.c_str(), state);
+        fflush(stderr);
+      }
+
+      if (name == "Pad N")
+        current_state.pad_up |= pressed;
+      else if (name == "Pad S")
+        current_state.pad_down |= pressed;
+      else if (name == "Pad W")
+        current_state.pad_left |= pressed;
+      else if (name == "Pad E")
+        current_state.pad_right |= pressed;
+      else if (name == "Button S")
+        current_state.button_select |= pressed;
+      else if (name == "Guide")
+        current_state.button_guide |= pressed;
+    }
+  }
+
+  auto& system = Core::System::GetInstance();
+  bool emulation_active = Core::IsRunningOrStarting(system);
+
+  if (current_state.button_guide && !m_last_gamepad_state.button_guide)
+  {
+    fprintf(stderr, "[GAMEPAD] PlayStation button pressed - requesting stop\n");
+    fflush(stderr);
+    emit RequestStop();
+  }
+
+  if (!emulation_active)
+  {
+    QWidget* target_widget = currentWidget();
+
+    if (current_state.pad_up && !m_last_gamepad_state.pad_up)
+    {
+      fprintf(stderr, "[GAMEPAD] Posting Key_Up event\n");
+      fflush(stderr);
+      QCoreApplication::postEvent(target_widget,
+                                   new QKeyEvent(QEvent::KeyPress, Qt::Key_Up, Qt::NoModifier));
+    }
+
+    if (current_state.pad_down && !m_last_gamepad_state.pad_down)
+    {
+      fprintf(stderr, "[GAMEPAD] Posting Key_Down event\n");
+      fflush(stderr);
+      QCoreApplication::postEvent(target_widget,
+                                   new QKeyEvent(QEvent::KeyPress, Qt::Key_Down, Qt::NoModifier));
+    }
+
+    if (current_state.pad_left && !m_last_gamepad_state.pad_left)
+    {
+      fprintf(stderr, "[GAMEPAD] Posting Key_Left event\n");
+      fflush(stderr);
+      QCoreApplication::postEvent(target_widget,
+                                   new QKeyEvent(QEvent::KeyPress, Qt::Key_Left, Qt::NoModifier));
+    }
+
+    if (current_state.pad_right && !m_last_gamepad_state.pad_right)
+    {
+      fprintf(stderr, "[GAMEPAD] Posting Key_Right event\n");
+      fflush(stderr);
+      QCoreApplication::postEvent(target_widget,
+                                   new QKeyEvent(QEvent::KeyPress, Qt::Key_Right, Qt::NoModifier));
+    }
+
+    if (current_state.button_select && !m_last_gamepad_state.button_select)
+    {
+      fprintf(stderr, "[GAMEPAD] Posting Key_Return event\n");
+      fflush(stderr);
+      QCoreApplication::postEvent(target_widget,
+                                   new QKeyEvent(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier));
+    }
+  }
+
+  m_last_gamepad_state = current_state;
 }
 
 void GameList::OnColumnVisibilityToggled(const QString& row, bool visible)
