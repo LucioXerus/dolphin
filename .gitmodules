@@ -84,8 +84,9 @@
 	shallow = true
 [submodule "Externals/minizip-ng/minizip-ng"]
 	path = Externals/minizip-ng/minizip-ng
-	url = https://github.com/zlib-ng/minizip-ng.git
+	url = https://github.com/gamrXerus/minizip-ng.git
 	shallow = true
+	branch = develop
 [submodule "Externals/Vulkan-Headers"]
 	path = Externals/Vulkan-Headers
 	url = https://github.com/KhronosGroup/Vulkan-Headers.git
