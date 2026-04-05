@@ -149,6 +149,8 @@ GameList::GameList(QWidget* parent) : QStackedWidget(parent), m_model(this)
   connect(m_grid, &QListView::doubleClicked, this, &GameList::GameSelected);
   connect(&m_model, &QAbstractItemModel::rowsInserted, this, &GameList::ConsiderViewChange);
   connect(&m_model, &QAbstractItemModel::rowsRemoved, this, &GameList::ConsiderViewChange);
+  connect(&m_model, &QAbstractItemModel::rowsInserted, this, &GameList::UpdateGameCount);
+  connect(&m_model, &QAbstractItemModel::rowsRemoved, this, &GameList::UpdateGameCount);
 
   addWidget(m_list);
   addWidget(m_grid);
@@ -1192,6 +1194,8 @@ void GameList::OnGameListVisibilityChanged()
 {
   m_list_proxy->invalidate();
   m_grid_proxy->invalidate();
+
+  UpdateGameCount();
 }
 
 void GameList::OnSectionResized(int index, int, int)
@@ -1320,6 +1324,15 @@ void GameList::SetSearchTerm(const QString& term)
   m_grid_proxy->invalidate();
 
   UpdateColumnVisibility();
+  UpdateGameCount();
+}
+
+void GameList::UpdateGameCount() const
+{
+  const int total_games = m_model.rowCount(QModelIndex{});
+  const int visible_games = m_list_proxy->rowCount();
+
+  emit GameCountUpdated(total_games, visible_games);
 }
 
 void GameList::ZoomIn()

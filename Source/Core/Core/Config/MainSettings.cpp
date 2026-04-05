@@ -44,6 +44,7 @@ const Info<PowerPC::CPUCore> MAIN_CPU_CORE{{System::Main, "Core", "CPUCore"},
                                            PowerPC::DefaultCPUCore()};
 const Info<bool> MAIN_JIT_FOLLOW_BRANCH{{System::Main, "Core", "JITFollowBranch"}, true};
 const Info<bool> MAIN_FASTMEM{{System::Main, "Core", "Fastmem"}, true};
+const Info<bool> MAIN_PAGE_TABLE_FASTMEM{{System::Main, "Core", "PageTableFastmem"}, true};
 const Info<bool> MAIN_FASTMEM_ARENA{{System::Main, "Core", "FastmemArena"}, true};
 const Info<bool> MAIN_LARGE_ENTRY_POINTS_MAP{{System::Main, "Core", "LargeEntryPointsMap"}, true};
 const Info<bool> MAIN_ACCURATE_CPU_CACHE{{System::Main, "Core", "AccurateCPUCache"}, false};
@@ -318,7 +319,7 @@ const Info<bool> MAIN_AUDIO_MUTED{{System::Main, "DSP", "Muted"}, false};
 const Info<bool> MAIN_AUDIO_MUTE_ON_DISABLED_SPEED_LIMIT{
     {System::Main, "DSP", "MuteOnDisabledSpeedLimit"}, false};
 #ifdef _WIN32
-const Info<std::string> MAIN_WASAPI_DEVICE{{System::Main, "DSP", "WASAPIDevice"}, "Default"};
+const Info<std::string> MAIN_WASAPI_DEVICE{{System::Main, "DSP", "WASAPIDevice"}, "default"};
 #endif
 
 bool ShouldUseDPL2Decoder()
@@ -397,14 +398,15 @@ void SetIsoPaths(const std::vector<std::string>& paths)
 
 #ifdef HAS_LIBMGBA
 const Info<std::string> MAIN_GBA_BIOS_PATH{{System::Main, "GBA", "BIOS"}, ""};
-const std::array<Info<std::string>, 4> MAIN_GBA_ROM_PATHS{
+const std::array<Info<std::string>, 5> MAIN_GBA_ROM_PATHS{
     Info<std::string>{{System::Main, "GBA", "Rom1"}, ""},
     Info<std::string>{{System::Main, "GBA", "Rom2"}, ""},
     Info<std::string>{{System::Main, "GBA", "Rom3"}, ""},
-    Info<std::string>{{System::Main, "GBA", "Rom4"}, ""}};
+    Info<std::string>{{System::Main, "GBA", "Rom4"}, ""},
+    Info<std::string>{{System::Main, "GBA", "GBPlayerRom"}, ""},
+};
 const Info<std::string> MAIN_GBA_SAVES_PATH{{System::Main, "GBA", "SavesPath"}, ""};
 const Info<bool> MAIN_GBA_SAVES_IN_ROM_PATH{{System::Main, "GBA", "SavesInRomPath"}, false};
-const Info<bool> MAIN_GBA_THREADS{{System::Main, "GBA", "Threads"}, true};
 #endif
 
 // Main.Network

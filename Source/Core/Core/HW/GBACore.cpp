@@ -27,9 +27,9 @@
 #include "Common/Crypto/SHA1.h"
 #include "Common/FileUtil.h"
 #include "Common/IOFile.h"
+#include "Common/Logging/Log.h"
 #include "Common/MinizipUtil.h"
 #include "Common/ScopeGuard.h"
-#include "Common/Thread.h"
 
 #include "Core/Config/MainSettings.h"
 #include "Core/ConfigManager.h"
@@ -38,6 +38,10 @@
 #include "Core/Host.h"
 #include "Core/NetPlayProto.h"
 #include "Core/System.h"
+
+#ifdef ANDROID
+#include "jni/AndroidCommon/AndroidCommon.h"
+#endif
 
 namespace HW::GBA
 {
@@ -52,20 +56,7 @@ constexpr size_t AUDIO_BUFFER_SIZE = 512;
 // libmGBA does not return the correct frequency for some GB models
 static u32 GetCoreFrequency(mCore* core)
 {
-  if (core->platform(core) != mPLATFORM_GB)
-    return static_cast<u32>(core->frequency(core));
-
-  switch (static_cast<::GB*>(core->board)->model)
-  {
-  case GB_MODEL_CGB:
-  case GB_MODEL_SCGB:
-  case GB_MODEL_AGB:
-    return CGB_SM83_FREQUENCY;
-  case GB_MODEL_SGB:
-    return SGB_SM83_FREQUENCY;
-  default:
-    return DMG_SM83_FREQUENCY;
-  }
+  return (core->platform(core) == mPLATFORM_GBA) ? GBA_ARM7TDMI_FREQUENCY : CGB_SM83_FREQUENCY;
 }
 
 static VFile* OpenROM_Archive(const char* path)
@@ -114,7 +105,7 @@ static VFile* OpenROM_Zip(const char* path)
       continue;
 
     vf = VFileMemChunk(buffer.data(), info->uncompressed_size);
-    if (mCoreIsCompatible(vf) == mPLATFORM_GBA)
+    if (mCoreIsCompatible(vf) != mPLATFORM_NONE)
     {
       vf->seek(vf, 0, SEEK_SET);
       break;
@@ -126,6 +117,15 @@ static VFile* OpenROM_Zip(const char* path)
   return vf;
 }
 
+static VFile* OpenReadOnlyFile(const char* path)
+{
+#ifdef ANDROID
+  if (IsPathAndroidContent(path))
+    return VFileFromFD(OpenAndroidContent(path, "r"));
+#endif
+  return VFileOpen(path, O_RDONLY);
+}
+
 static VFile* OpenROM(const char* rom_path)
 {
   VFile* vf{};
@@ -134,7 +134,7 @@ static VFile* OpenROM(const char* rom_path)
   if (!vf)
     vf = OpenROM_Zip(rom_path);
   if (!vf)
-    vf = VFileOpen(rom_path, O_RDONLY);
+    vf = OpenReadOnlyFile(rom_path);
   if (!vf)
     return nullptr;
 
@@ -209,10 +209,18 @@ bool Core::Start(u64 gc_ticks)
   mCoreConfigSetIntValue(&m_core->config, "useBios", 0);
   mCoreConfigSetIntValue(&m_core->config, "skipBios", 0);
 
-  if (m_core->platform(m_core) == mPLATFORM_GBA &&
-      !LoadBIOS(File::GetUserPath(F_GBABIOS_IDX).c_str()))
+  // If we eventually load GBC BIOS, then these should potentially all be "CGB".
+  mCoreConfigSetValue(&m_core->config, "gb.model", "DMG");
+  mCoreConfigSetValue(&m_core->config, "sgb.model", "DMG");
+  mCoreConfigSetValue(&m_core->config, "cgb.model", "CGB");
+  mCoreConfigSetValue(&m_core->config, "cgb.hybridModel", "CGB");
+  mCoreConfigSetValue(&m_core->config, "cgb.sgbModel", "CGB");
+
+  mCoreConfigSetIntValue(&m_core->config, "gb.colors", GB_COLORS_CGB);
+
+  if (m_core->platform(m_core) == mPLATFORM_GBA)
   {
-    return false;
+    LoadBIOS(File::GetUserPath(F_GBABIOS_IDX).c_str());
   }
 
   if (rom)
@@ -239,11 +247,15 @@ bool Core::Start(u64 gc_ticks)
   m_gc_ticks_remainder = 0;
   m_keys = 0;
 
-  SetSIODriver();
+  if (m_device_number != Config::GBPLAYER_GBA_INDEX)
+  {
+    SetSIODriver();
+    SetAVStream();
+  }
+
   SetVideoBuffer();
   SetAudioBufferSize();
   AddCallbacks();
-  SetAVStream();
   SetupEvent();
 
   m_core->reset(m_core);
@@ -252,29 +264,15 @@ bool Core::Start(u64 gc_ticks)
   // Notify the host and handle a dimension change if that happened after reset()
   SetVideoBuffer();
 
-  if (Config::Get(Config::MAIN_GBA_THREADS))
-  {
-    m_idle = true;
-    m_exit_loop = false;
-    m_thread = std::make_unique<std::thread>([this] { ThreadLoop(); });
-  }
-
+  m_event_thread.Reset(fmt::format("GBA{}", m_device_number + 1),
+                       std::bind_front(&Core::HandleEvent, this));
   return true;
 }
 
 void Core::Stop()
 {
-  if (m_thread)
-  {
-    Flush();
-    m_exit_loop = true;
-    {
-      std::lock_guard<std::mutex> lock(m_queue_mutex);
-      m_command_cv.notify_one();
-    }
-    m_thread->join();
-    m_thread.reset();
-  }
+  m_event_thread.Shutdown();
+
   if (m_core)
   {
     mCoreConfigDeinit(&m_core->config);
@@ -345,16 +343,16 @@ void Core::EReaderQueueCard(std::string_view card_path)
 
 bool Core::LoadBIOS(const char* bios_path)
 {
-  VFile* vf = VFileOpen(bios_path, O_RDONLY);
+  VFile* vf = OpenReadOnlyFile(bios_path);
   if (!vf)
   {
-    PanicAlertFmtT("Error: GBA{0} failed to open the BIOS in {1}", m_device_number + 1, bios_path);
+    ERROR_LOG_FMT(CORE, "GBA{0} failed to open the BIOS in {1}", m_device_number + 1, bios_path);
     return false;
   }
 
   if (!m_core->loadBIOS(m_core, vf, 0))
   {
-    PanicAlertFmtT("Error: GBA{0} failed to load the BIOS in {1}", m_device_number + 1, bios_path);
+    ERROR_LOG_FMT(CORE, "GBA{0} failed to load the BIOS in {1}", m_device_number + 1, bios_path);
     vf->close(vf);
     return false;
   }
@@ -405,10 +403,28 @@ void Core::SetSIODriver()
 
 void Core::SetVideoBuffer()
 {
-  u32 width, height;
-  m_core->currentVideoSize(m_core, &width, &height);
-  m_video_buffer.resize(width * height);
-  m_core->setVideoBuffer(m_core, m_video_buffer.data(), width);
+  if (m_device_number == Config::GBPLAYER_GBA_INDEX)
+  {
+    // GBPlayer expects a GBA-sized video buffer even in GB mode.
+    // Clear it first to avoid stuck colors from the previous game on switch from GBA->GB.
+    m_video_buffer.clear();
+    m_video_buffer.resize(std::size_t{GBA_VIDEO_HORIZONTAL_PIXELS} * GBA_VIDEO_VERTICAL_PIXELS);
+
+    constexpr size_t GB_VIDEO_OFFSET = 1960;
+
+    m_core->setVideoBuffer(
+        m_core, m_video_buffer.data() + ((GetPlatform() == mPLATFORM_GBA) ? 0 : GB_VIDEO_OFFSET),
+        GBA_VIDEO_HORIZONTAL_PIXELS);
+  }
+  else
+  {
+    u32 width;
+    u32 height;
+    m_core->currentVideoSize(m_core, &width, &height);
+    m_video_buffer.resize(std::size_t{width} * height);
+    m_core->setVideoBuffer(m_core, m_video_buffer.data(), width);
+  }
+
   if (auto host = m_host.lock())
     host->GameChanged();
 }
@@ -445,8 +461,7 @@ void Core::SetAVStream()
   m_stream.audioRateChanged = [](mAVStream* stream, unsigned rate) {
     auto* core = static_cast<AVStream*>(stream)->core;
     auto* const sound_stream = core->m_system.GetSoundStream();
-    sound_stream->GetMixer()->SetGBAInputSampleRateDivisors(
-        core->m_device_number, Mixer::FIXED_SAMPLE_RATE_DIVIDEND / rate);
+    sound_stream->GetMixer()->SetGBAInputSampleRate(core->m_device_number, rate);
   };
   m_stream.postAudioBuffer = [](mAVStream* stream, mAudioBuffer* audio_buffer) {
     size_t sample_count = mAudioBufferAvailable(audio_buffer);
@@ -481,103 +496,91 @@ void Core::SetupEvent()
   m_event.priority = 0x80;
 }
 
+void Core::RunFrame(u16 keys)
+{
+  PushEvent({
+      .event_type = SyncEventType::RunFrame,
+      .keys = keys,
+  });
+}
+
+void Core::SyncJoybus(u64 gc_ticks, u16 keys)
+{
+  PushEvent({
+      .event_type = SyncEventType::TimeSync,
+      .keys = keys,
+      .run_until_ticks = gc_ticks,
+  });
+}
+
 void Core::SendJoybusCommand(u64 gc_ticks, int transfer_time, u8* buffer, u16 keys)
 {
   if (!IsStarted())
     return;
 
-  Command command{};
-  command.ticks = gc_ticks;
-  command.transfer_time = transfer_time;
-  command.sync_only = buffer == nullptr;
-  if (buffer)
-    std::copy_n(buffer, command.buffer.size(), command.buffer.begin());
-  command.keys = keys;
+  m_joybus_command_transfer_time = transfer_time;
+  m_joybus_command = GBASIOJOYCommand(buffer[0]);
+  std::copy_n(buffer + 1, m_joybus_buffer.size(), m_joybus_buffer.data());
 
-  if (m_thread)
-  {
-    std::lock_guard<std::mutex> lock(m_queue_mutex);
-    m_command_queue.push(command);
-    m_idle = false;
-    m_command_cv.notify_one();
-  }
-  else
-  {
-    RunCommand(command);
-  }
+  m_command_pending.store(true, std::memory_order_relaxed);
+
+  PushEvent({
+      .event_type = SyncEventType::RunCommand,
+      .keys = keys,
+      .run_until_ticks = gc_ticks,
+  });
 }
 
-std::vector<u8> Core::GetJoybusResponse()
+int Core::GetJoybusResponse(u8* data_out)
 {
-  if (!IsStarted())
-    return {};
+  m_command_pending.wait(true, std::memory_order_acquire);
 
-  if (m_thread)
-  {
-    std::unique_lock<std::mutex> lock(m_response_mutex);
-    m_response_cv.wait(lock, [&] { return m_response_ready; });
-  }
-  m_response_ready = false;
-  return m_response;
+  std::copy_n(m_joybus_buffer.data(), m_response_size, data_out);
+  return m_response_size;
 }
 
 void Core::Flush()
 {
-  if (!IsStarted() || !m_thread)
+  m_event_thread.WaitForCompletion();
+}
+
+void Core::PushEvent(SyncEvent event)
+{
+  m_event_thread.Push(event);
+}
+
+void Core::HandleEvent(SyncEvent event)
+{
+  m_keys = event.keys;
+
+  if (event.event_type == SyncEventType::RunFrame)
+  {
+    m_last_gc_ticks = m_system.GetCoreTiming().GetTicks();
+    m_gc_ticks_remainder = 0;
+
+    m_core->runFrame(m_core);
     return;
-  std::unique_lock<std::mutex> lock(m_queue_mutex);
-  m_response_cv.wait(lock, [&] { return m_idle; });
-}
-
-void Core::ThreadLoop()
-{
-  Common::SetCurrentThreadName(fmt::format("GBA{}", m_device_number + 1).c_str());
-  std::unique_lock<std::mutex> queue_lock(m_queue_mutex);
-  while (true)
-  {
-    m_command_cv.wait(queue_lock, [&] { return !m_command_queue.empty() || m_exit_loop; });
-    if (m_exit_loop)
-      break;
-    Command command{m_command_queue.front()};
-    m_command_queue.pop();
-    queue_lock.unlock();
-
-    RunCommand(command);
-
-    queue_lock.lock();
-    if (m_command_queue.empty())
-      m_idle = true;
-    m_response_cv.notify_one();
   }
-}
 
-void Core::RunCommand(Command& command)
-{
-  m_keys = command.keys;
-  RunUntil(command.ticks);
-  if (!command.sync_only)
+  RunUntil(event.run_until_ticks);
+
+  if (event.event_type != SyncEventType::RunCommand)
+    return;
+
+  if (m_link_enabled && !m_force_disconnect)
   {
-    m_response.clear();
-    if (m_link_enabled && !m_force_disconnect)
-    {
-      int recvd = GBASIOJOYSendCommand(
-          &m_sio_driver, static_cast<GBASIOJOYCommand>(command.buffer[0]), &command.buffer[1]);
-      std::copy_n(command.buffer.begin() + 1, recvd, std::back_inserter(m_response));
-    }
-
-    if (m_thread && !m_response_ready)
-    {
-      std::lock_guard<std::mutex> response_lock(m_response_mutex);
-      m_response_ready = true;
-      m_response_cv.notify_one();
-    }
-    else
-    {
-      m_response_ready = true;
-    }
+    m_response_size =
+        u8(GBASIOJOYSendCommand(&m_sio_driver, m_joybus_command, m_joybus_buffer.data()));
   }
-  if (command.transfer_time)
-    RunFor(command.transfer_time);
+  else
+  {
+    m_response_size = 0;
+  }
+
+  m_command_pending.store(false, std::memory_order_release);
+  m_command_pending.notify_one();
+
+  RunFor(m_joybus_command_transfer_time);
 }
 
 void Core::RunUntil(u64 gc_ticks)
@@ -670,11 +673,13 @@ void Core::ExportSave(std::string_view save_path)
 void Core::DoState(PointerWrap& p)
 {
   Flush();
-  if (!IsStarted())
+
+  bool is_started = IsStarted();
+  p.Do(is_started);
+
+  if (!is_started)
   {
-    ::Core::DisplayMessage(fmt::format("GBA{} core not started. Aborting.", m_device_number + 1),
-                           3000);
-    p.SetVerifyMode();
+    Stop();
     return;
   }
 
@@ -695,13 +700,15 @@ void Core::DoState(PointerWrap& p)
     return;
   }
 
+  Start(0);
+
   p.Do(m_video_buffer);
   p.Do(m_last_gc_ticks);
   p.Do(m_gc_ticks_remainder);
   p.Do(m_keys);
   p.Do(m_link_enabled);
-  p.Do(m_response_ready);
-  p.Do(m_response);
+  p.Do(m_response_size);
+  p.Do(m_joybus_buffer);
 
   std::vector<u8> core_state;
   core_state.resize(m_core->stateSize(m_core));

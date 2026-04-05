@@ -57,6 +57,7 @@ extern const Info<bool> MAIN_SKIP_IPL;
 extern const Info<PowerPC::CPUCore> MAIN_CPU_CORE;
 extern const Info<bool> MAIN_JIT_FOLLOW_BRANCH;
 extern const Info<bool> MAIN_FASTMEM;
+extern const Info<bool> MAIN_PAGE_TABLE_FASTMEM;
 extern const Info<bool> MAIN_FASTMEM_ARENA;
 extern const Info<bool> MAIN_LARGE_ENTRY_POINTS_MAP;
 extern const Info<bool> MAIN_ACCURATE_CPU_CACHE;
@@ -223,10 +224,11 @@ void SetIsoPaths(const std::vector<std::string>& paths);
 
 #ifdef HAS_LIBMGBA
 extern const Info<std::string> MAIN_GBA_BIOS_PATH;
-extern const std::array<Info<std::string>, 4> MAIN_GBA_ROM_PATHS;
+extern const std::array<Info<std::string>, 5> MAIN_GBA_ROM_PATHS;
 extern const Info<std::string> MAIN_GBA_SAVES_PATH;
 extern const Info<bool> MAIN_GBA_SAVES_IN_ROM_PATH;
-extern const Info<bool> MAIN_GBA_THREADS;
+
+static constexpr std::size_t GBPLAYER_GBA_INDEX = 4;
 #endif
 
 // Main.Network
