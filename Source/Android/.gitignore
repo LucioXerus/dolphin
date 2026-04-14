@@ -1,6 +1,11 @@
 # built application files
 *.apk
 *.ap_
+*.apk.idsig
+
+# Keystores (NEVER commit these)
+*.keystore
+*.jks
 
 # files for the dex VM
 *.dex

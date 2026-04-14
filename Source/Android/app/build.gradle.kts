@@ -16,7 +16,6 @@ android {
     }
 
     compileOptions {
-        // Flag to enable support for the new language APIs
         isCoreLibraryDesugaringEnabled = true
 
         sourceCompatibility = JavaVersion.VERSION_17
@@ -24,13 +23,7 @@ android {
     }
 
     lint {
-        // This is important as it will run lint but not abort on error
-        // Lint has some overly obnoxious "errors" that should really be warnings
         abortOnError = false
-
-        //Uncomment disable lines for test builds...
-        //disable "MissingTranslation"
-        //disable "ExtraTranslation"
     }
 
     defaultConfig {
@@ -59,9 +52,7 @@ android {
         }
     }
 
-    // Define build types, which are orthogonal to product flavors.
     buildTypes {
-        // Signed by release key, allowing for upload to Play Store.
         release {
             if (project.hasProperty("keystore")) {
                 signingConfig = signingConfigs.getByName("release")
@@ -76,8 +67,6 @@ android {
             )
         }
 
-        // Signed by debug key disallowing distribution on Play Store.
-        // Attaches "debug" suffix to version and package name, allowing installation alongside the release build.
         debug {
             resValue("string", "app_name_suffixed", "Dolphin Debug")
             applicationIdSuffix = ".debug"
@@ -100,13 +89,12 @@ android {
                 arguments(
                     "-DANDROID_STL=c++_static",
                     "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON",
-                    "-DCMAKE_BUILD_TYPE=RelWithDebInfo"
-                    // , "-DENABLE_GENERIC=ON"
+                    "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
+                    "-DENABLE_LTO=ON",
+                    "-DCMAKE_C_FLAGS_RELWITHDEBINFO=-O3 -march=armv8.2-a+crc+dotprod+fp16fml -mtune=cortex-a77 -fno-strict-aliasing -ffast-math -funroll-loops",
+                    "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-O3 -march=armv8.2-a+crc+dotprod+fp16fml -mtune=cortex-a77 -fno-strict-aliasing -ffast-math -funroll-loops"
                 )
-                abiFilters("arm64-v8a", "x86_64") //, "armeabi-v7a", "x86"
-
-                // Uncomment the line below if you don't want to build the C++ unit tests
-                //targets("main", "hook_impl", "main_hook", "gsl_alloc_hook", "file_redirect_hook")
+                abiFilters("arm64-v8a")
             }
         }
     }
@@ -132,19 +120,15 @@ dependencies {
     implementation(libs.androidx.preference.ktx)
     implementation(libs.androidx.profileinstaller)
 
-    // Kotlin extensions for lifecycle components
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
 
-    // Android TV UI libraries.
     implementation(libs.androidx.leanback)
     implementation(libs.androidx.tvprovider)
     implementation(libs.androidx.swiperefreshlayout)
 
-    // For loading game covers from disk and GameTDB
     implementation(libs.coil)
 
-    // For loading custom GPU drivers
     implementation(libs.kotlinx.serialization.json)
 
     implementation(libs.kotlinx.coroutines.android)
