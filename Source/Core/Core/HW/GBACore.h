@@ -12,18 +12,22 @@
 #include <string_view>
 #include <vector>
 
-#define PYCPARSE  // Remove static functions from the header
-#include <mgba/core/interface.h>
-#undef PYCPARSE
 #include <mgba/core/core.h>
+#include <mgba/core/interface.h>
+#if !defined(_WIN32)
+#define USE_PTHREADS  // Required for Mutex/Condition in mCoreSync.
+#endif
+#include <mgba/core/sync.h>
+#undef USE_PTHREADS
 #include <mgba/gba/interface.h>
 
-#include "Common/Buffer.h"
 #include "Common/CommonTypes.h"
 #include "Common/WorkQueueThread.h"
 
 class GBAHostInterface;
+class Mixer;
 class PointerWrap;
+
 namespace Core
 {
 class System;
@@ -31,15 +35,18 @@ class System;
 
 namespace HW::GBA
 {
+
 class Core;
+
 struct SIODriver : GBASIODriver
 {
   Core* core;
 };
+
 struct AVStream : mAVStream
 {
   Core* core;
-  Common::UniqueBuffer<s16> sample_buffer;
+  Mixer* mixer;
 };
 
 struct CoreInfo
@@ -73,13 +80,14 @@ public:
   void SetForceDisconnect(bool force_disconnect);
   void EReaderQueueCard(std::string_view card_path);
 
-  void RunFrame(u16 keys);
   void SyncJoybus(u64 gc_ticks, u16 keys);
   void SendJoybusCommand(u64 gc_ticks, int transfer_time, u8* buffer, u16 keys);
   int GetJoybusResponse(u8* data_out);
 
   // Wait for requested GBA emulation to complete.
   void Flush();
+
+  mCore* GetCore() { return m_core; }
 
   mAudioBuffer* GetAudioBuffer() { return m_core->getAudioBuffer(m_core); }
   std::span<const u32> GetVideoBuffer() const { return m_video_buffer; }
@@ -104,13 +112,12 @@ private:
   {
     TimeSync,
     RunCommand,
-    RunFrame,
   };
   struct SyncEvent
   {
     SyncEventType event_type{};
     u16 keys{};
-    u64 run_until_ticks{};  // Not used by SyncEventType::RunFrame.
+    u64 run_until_ticks{};
   };
   void PushEvent(SyncEvent event);
   void HandleEvent(SyncEvent event);
@@ -134,6 +141,7 @@ private:
   std::string m_game_title;
 
   mCore* m_core{};
+  mCoreSync m_core_sync{};
   mTimingEvent m_event{};
   bool m_waiting_for_event = false;
   SIODriver m_sio_driver{};
@@ -164,5 +172,7 @@ private:
 
   ::Core::System& m_system;
 };
+
 }  // namespace HW::GBA
+
 #endif  // HAS_LIBMGBA
