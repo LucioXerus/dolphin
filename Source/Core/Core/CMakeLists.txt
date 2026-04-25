@@ -644,6 +644,14 @@ if(_M_X86_64)
     PowerPC/Jit64Common/TrampolineCache.cpp
     PowerPC/Jit64Common/TrampolineCache.h
     PowerPC/Jit64Common/TrampolineInfo.h
+    PowerPC/AOT64/AOTFile.cpp
+    PowerPC/AOT64/AOTFile.h
+    PowerPC/AOT64/AOTSerializer.cpp
+    PowerPC/AOT64/AOTSerializer.h
+    PowerPC/AOT64/AOTLoader.cpp
+    PowerPC/AOT64/AOTLoader.h
+    PowerPC/AOT64/AOTJit64.cpp
+    PowerPC/AOT64/AOTJit64.h
   )
 elseif(_M_ARM_64)
   target_sources(core PRIVATE

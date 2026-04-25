@@ -230,6 +230,7 @@ std::span<const CPUCore> AvailableCPUCores()
   static constexpr auto cpu_cores = {
 #ifdef _M_X86_64
       CPUCore::JIT64,
+      CPUCore::AOT64,
 #elif defined(_M_ARM_64)
       CPUCore::JITARM64,
 #endif
