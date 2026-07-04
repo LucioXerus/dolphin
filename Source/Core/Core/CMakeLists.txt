@@ -621,6 +621,10 @@ if(_M_X86_64)
     PowerPC/Jit64/Jit_SystemRegisters.cpp
     PowerPC/Jit64/JitAsm.cpp
     PowerPC/Jit64/JitAsm.h
+    PowerPC/JitAot64/AotCache.cpp
+    PowerPC/JitAot64/AotCache.h
+    PowerPC/JitAot64/JitAot64.cpp
+    PowerPC/JitAot64/JitAot64.h
     PowerPC/Jit64/RegCache/CachedReg.h
     PowerPC/Jit64/RegCache/FPURegCache.cpp
     PowerPC/Jit64/RegCache/FPURegCache.h

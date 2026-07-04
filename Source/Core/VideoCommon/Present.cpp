@@ -3,6 +3,11 @@
 
 #include "VideoCommon/Present.h"
 
+#include <algorithm>
+#include <cstddef>
+
+#include <imgui.h>
+
 #include "Common/ChunkFile.h"
 #include "Core/Config/GraphicsSettings.h"
 #include "Core/Config/MainSettings.h"
@@ -1056,6 +1061,31 @@ void Presenter::DoState(PointerWrap& p)
 
     ImmediateSwap(m_last_xfb_addr, m_last_xfb_width, m_last_xfb_stride, m_last_xfb_height);
   }
+}
+
+void DrawImmediateProgressBar(const std::string& title, const std::string& label, float fraction)
+{
+  if (!g_presenter)
+    return;
+
+  const float center_x = ImGui::GetIO().DisplaySize.x * 0.5f;
+  const float center_y = ImGui::GetIO().DisplaySize.y * 0.5f;
+  const float scale = ImGui::GetIO().DisplayFramebufferScale.x;
+
+  ImGui::SetNextWindowSize(ImVec2(400.0f * scale, 50.0f * scale), ImGuiCond_Always);
+  ImGui::SetNextWindowPos(ImVec2(center_x, center_y), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+  if (ImGui::Begin(title.c_str(), nullptr,
+                   ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoInputs |
+                       ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoNav |
+                       ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing))
+  {
+    ImGui::TextUnformatted(label.c_str());
+    ImGui::ProgressBar(std::clamp(fraction, 0.0f, 1.0f), ImVec2(-1.0f, 0.0f), "");
+  }
+  ImGui::End();
+
+  g_presenter->Present();
 }
 
 }  // namespace VideoCommon

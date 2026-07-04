@@ -14,6 +14,7 @@
 #include <array>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <tuple>
 
 class AbstractTexture;
@@ -194,6 +195,13 @@ private:
 
   std::atomic_bool m_immediate_swap_happened_this_field{};
 };
+
+// Draws a single centered modal progress bar over a black screen and presents it immediately.
+// Intended for long-running boot-time tasks (shader compilation, ahead-of-time recompilation)
+// that block before the game becomes visible. `title` is the (localized) window title used to
+// identify the ImGui window, and `label` is the text shown above the bar (e.g. already formatted
+// with a "x/y" count). Must be called from the thread that owns presentation.
+void DrawImmediateProgressBar(const std::string& title, const std::string& label, float fraction);
 
 }  // namespace VideoCommon
 

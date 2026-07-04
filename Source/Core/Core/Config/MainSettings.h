@@ -56,6 +56,9 @@ namespace Config
 extern const Info<bool> MAIN_SKIP_IPL;
 extern const Info<PowerPC::CPUCore> MAIN_CPU_CORE;
 extern const Info<bool> MAIN_JIT_FOLLOW_BRANCH;
+// When using the AOT Recompiler CPU core, precompile all previously discovered PowerPC code
+// (behind a progress bar) before the game starts.
+extern const Info<bool> MAIN_PRECOMPILE_POWERPC;
 extern const Info<bool> MAIN_FASTMEM;
 extern const Info<bool> MAIN_PAGE_TABLE_FASTMEM;
 extern const Info<bool> MAIN_FASTMEM_ARENA;

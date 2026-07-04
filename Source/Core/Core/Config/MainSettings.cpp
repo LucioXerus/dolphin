@@ -43,6 +43,7 @@ const Info<bool> MAIN_SKIP_IPL{{System::Main, "Core", "SkipIPL"}, true};
 const Info<PowerPC::CPUCore> MAIN_CPU_CORE{{System::Main, "Core", "CPUCore"},
                                            PowerPC::DefaultCPUCore()};
 const Info<bool> MAIN_JIT_FOLLOW_BRANCH{{System::Main, "Core", "JITFollowBranch"}, true};
+const Info<bool> MAIN_PRECOMPILE_POWERPC{{System::Main, "Core", "PrecompilePowerPC"}, true};
 const Info<bool> MAIN_FASTMEM{{System::Main, "Core", "Fastmem"}, true};
 const Info<bool> MAIN_PAGE_TABLE_FASTMEM{{System::Main, "Core", "PageTableFastmem"}, true};
 const Info<bool> MAIN_FASTMEM_ARENA{{System::Main, "Core", "FastmemArena"}, true};
