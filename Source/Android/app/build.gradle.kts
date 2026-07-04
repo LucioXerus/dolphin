@@ -1,5 +1,6 @@
 plugins {
     alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.androidx.baselineprofile)
 }
@@ -10,6 +11,7 @@ android {
     ndkVersion = "29.0.14206865"
 
     buildFeatures {
+        compose = true
         viewBinding = true
         buildConfig = true
         resValues = true
@@ -104,6 +106,12 @@ android {
     }
 }
 
+kotlin {
+    compilerOptions {
+        freeCompilerArgs.add("-Xannotation-default-target=param-property")
+    }
+}
+
 dependencies {
     baselineProfile(project(":benchmark"))
     coreLibraryDesugaring(libs.desugar.jdk.libs)
@@ -120,6 +128,8 @@ dependencies {
     implementation(libs.androidx.preference.ktx)
     implementation(libs.androidx.profileinstaller)
 
+    // Kotlin extensions for lifecycle components
+    implementation(libs.androidx.lifecycle.livedata.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
 
@@ -128,12 +138,24 @@ dependencies {
     implementation(libs.androidx.swiperefreshlayout)
 
     implementation(libs.coil)
+    implementation(libs.coil.compose)
 
     implementation(libs.kotlinx.serialization.json)
 
     implementation(libs.kotlinx.coroutines.android)
 
     implementation(libs.filepicker)
+
+    // Jetpack Compose
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.compose.material.icons)
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material3.adaptive)
+    implementation(libs.androidx.compose.runtime.livedata)
+    implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.ui.tooling)
+    implementation(libs.androidx.compose.ui.tooling.preview)
 }
 
 fun getGitVersion(): String {
