@@ -322,29 +322,54 @@ FUNCTION_TARGET_SSE42
 static u64 GetHash64_SSE42_CRC32(const u8* src, u32 len, u32 samples)
 {
   u64 h[4] = {len, 0, 0, 0};
-  u32 Step = (len / 8);
-  const u64* data = (const u64*)src;
-  const u64* end = data + Step;
-  if (samples == 0)
-    samples = std::max(Step, 1u);
-  Step = Step / samples;
-  if (Step < 1)
-    Step = 1;
+  const u32 word_count = len / 8;
+  const u64* const data = reinterpret_cast<const u64*>(src);
+  const u64* const end = data + word_count;
 
-  while (data < end - Step * 3)
+  if (samples == 0)
+    samples = std::max(word_count, 1u);
+  samples = std::min(samples, std::max(word_count, 1u));
+
+  // Read a full 64-byte cache line (8 u64 words) at each sample location instead of a
+  // single strided word. The previous code touched a fresh cache line for every word it
+  // hashed but used only 8 of the 64 bytes each line brings in from memory, which made
+  // this function responsible for ~half of the emulator's last-level-cache misses.
+  // Hashing the whole line we already pay to fetch keeps the amount of work (~`samples`
+  // words) about the same while touching ~8x fewer cache lines.
+  //
+  // This is an internal, per-session content hash (used to detect when a game texture's
+  // memory changed); custom texture packs are matched via XXH64 elsewhere, so changing
+  // the values produced here is safe.
+  constexpr u32 WORDS_PER_LINE = 8;  // 64-byte cache line / sizeof(u64)
+  const u32 groups = std::max(samples / WORDS_PER_LINE, 1u);
+  const u32 group_stride = word_count / groups;  // words between group starts
+
+  if (group_stride <= WORDS_PER_LINE)
   {
-    h[0] = _mm_crc32_u64(h[0], data[Step * 0]);
-    h[1] = _mm_crc32_u64(h[1], data[Step * 1]);
-    h[2] = _mm_crc32_u64(h[2], data[Step * 2]);
-    h[3] = _mm_crc32_u64(h[3], data[Step * 3]);
-    data += Step * 4;
+    // Dense sampling (includes the full-hash case, samples == 0): groups would overlap,
+    // so just hash every word contiguously.
+    for (u32 i = 0; i < word_count; ++i)
+      h[i & 3] = _mm_crc32_u64(h[i & 3], data[i]);
   }
-  if (data < end - Step * 0)
-    h[0] = _mm_crc32_u64(h[0], data[Step * 0]);
-  if (data < end - Step * 1)
-    h[1] = _mm_crc32_u64(h[1], data[Step * 1]);
-  if (data < end - Step * 2)
-    h[2] = _mm_crc32_u64(h[2], data[Step * 2]);
+  else
+  {
+    // Sparse sampling: one contiguous cache line per group, spread across the data.
+    // group_stride > WORDS_PER_LINE guarantees the last group's 8 reads stay in bounds:
+    // max start = (groups-1)*group_stride <= word_count - group_stride <= word_count - 9.
+    u32 pos = 0;
+    for (u32 g = 0; g < groups; ++g, pos += group_stride)
+    {
+      const u64* const line = data + pos;
+      h[0] = _mm_crc32_u64(h[0], line[0]);
+      h[1] = _mm_crc32_u64(h[1], line[1]);
+      h[2] = _mm_crc32_u64(h[2], line[2]);
+      h[3] = _mm_crc32_u64(h[3], line[3]);
+      h[0] = _mm_crc32_u64(h[0], line[4]);
+      h[1] = _mm_crc32_u64(h[1], line[5]);
+      h[2] = _mm_crc32_u64(h[2], line[6]);
+      h[3] = _mm_crc32_u64(h[3], line[7]);
+    }
+  }
 
   if (len & 7)
   {

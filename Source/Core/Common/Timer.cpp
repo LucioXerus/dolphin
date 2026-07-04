@@ -12,6 +12,10 @@
 #include <timeapi.h>
 #endif
 
+#if defined(_M_X86_64)
+#include <immintrin.h>
+#endif
+
 #include "Common/CommonTypes.h"
 #include "Common/Logging/Log.h"
 
@@ -187,7 +191,14 @@ void PrecisionTimer::SleepUntil(Clock::time_point target)
   {
 #if defined(_WIN32)
     YieldProcessor();
+#elif defined(_M_X86_64)
+    // Pure-userspace spin hint. Unlike std::this_thread::yield() (which is a
+    // sched_yield() syscall on Linux), this avoids the syscall, the scheduler
+    // pass, and the per-syscall speculation-mitigation cost that otherwise
+    // dominate the CPU thread while throttling. Matches the Windows path above.
+    _mm_pause();
 #else
+    // TODO: ARM64 could use __yield() (arm_acle.h) as an equivalent spin hint.
     std::this_thread::yield();
 #endif
   }
