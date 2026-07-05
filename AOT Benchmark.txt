@@ -1,0 +1,119 @@
+Complete. Here's the full picture across all three comparisons.
+
+  Uncapped AOT vs JIT (the meaningful comparison — throttle removed)
+
+  ┌─────────────────────────────────────┬─────────┬─────────┬───────────┐
+  │               metric                │   AOT   │   JIT   │ Δ JIT/AOT │
+  ├─────────────────────────────────────┼─────────┼─────────┼───────────┤
+  │ IPC                                 │ 1.080   │ 1.093   │ +1.2%     │
+  ├─────────────────────────────────────┼─────────┼─────────┼───────────┤
+  │ cache-miss / 1k insn                │ 10.34   │ 10.03   │ −3.0%     │
+  ├─────────────────────────────────────┼─────────┼─────────┼───────────┤
+  │ LLC miss rate                       │ 36.3%   │ 34.6%   │ −4.6%     │
+  ├─────────────────────────────────────┼─────────┼─────────┼───────────┤
+  │ branch-miss rate                    │ 1.976%  │ 2.017%  │ +2.1%     │
+  ├─────────────────────────────────────┼─────────┼─────────┼───────────┤
+  │ cycles (30s)                        │ 57.44 B │ 55.61 B │ −3.2%     │
+  ├─────────────────────────────────────┼─────────┼─────────┼───────────┤
+  │ instructions (30s)                  │ 62.04 B │ 60.75 B │ −2.1%     │
+  ├─────────────────────────────────────┼─────────┼─────────┼───────────┤
+  │ recompiled-code share of CPU thread │ 39.6%   │ 39.6%   │ ~0        │
+  ├─────────────────────────────────────┼─────────┼─────────┼───────────┤
+  │ throttle spin (SleepUntil)          │ 0%      │ 0%      │ gone ✓    │
+  └─────────────────────────────────────┴─────────┴─────────┴───────────┘
+
+  Verdict: AOT and JIT are effectively at parity for this game
+
+  - Per-instruction efficiency is nearly identical, with JIT holding a razor-thin edge: +1.2% IPC and ~3–5% fewer cache misses per instruction. That's a real but tiny signal — not something you'd feel in gameplay.
+  - The recompiled PowerPC code is ~40% of the CPU-GPU thread in both backends, and that fraction is identical (39.64% vs 39.59%). Whatever each recompiler emits, it costs about the same to run here.
+  - The other ~60% is fixed emulation overhead neither recompiler touches: GPU FIFO run on the CPU thread (RunGpuOnCpu, OpcodeDecoder, VertexLoaderManager), texture hashing (GetHash64_SSE42_CRC32, XXH64), and memmove/memset (already
+  AVX-512 EVEX).
+
+  The bigger finding: your real bottleneck isn't the recompiler
+
+  Two things dominate that dwarf the AOT-vs-JIT question:
+
+  1. At capped speed (rounds 1–2), the CPU spent ~28% just spin-waiting in the frame throttler — pure waste. IPC was 0.77 vs 1.08 uncapped. That's expected/normal, but it means at normal play both backends are idle-throttled and
+  indistinguishable.
+  2. You're running single-core mode — RunGpuOnCpu means the GPU FIFO is emulated serially on the same thread as the PowerPC CPU. On your 16-thread i9-11900K that leaves a lot on the table. Enabling Dual Core (Config → General → Dual
+  Core) offloads GPU emulation to its own thread and will help far more than any recompiler swap.
+
+  Honest limitations of this run
+
+  - PerfMapDir didn't take effect (no /tmp/perf-<pid>.map), so the recompiled blocks stayed unsymbolized — I can measure their aggregate cost (the 39.6%) but not rank individual hot PPC blocks by name.
+  - Uncapped, I didn't capture in-game FPS, so absolute cycle/instruction counts aren't perfectly normalized to frames rendered. The per-instruction metrics (IPC, misses/1k-insn) are normalized and are the trustworthy basis for the "JIT
+  slightly ahead" conclusion.
+
+  If you want to go deeper
+
+  - Block-level view: fix PerfMapDir (it must be set before booting the game, and the JIT-block-registration/JitRegister path must be compiled in) → I can then show the hottest recompiled PPC blocks by name for each backend.
+  - The change that'll actually speed things up: flip on Dual Core and I'll re-profile to quantify the gain.
+
+  All raw data is in /home/christopher/dolphin-perf/ (perf-{aot,jit,aot-unc,jit-unc}.data, stat-*.txt). Want me to investigate the Dual Core angle, or set up the perf-map path for block-level recompiler symbolization?
+
+✻ Cogitated for 2m 22s
+
+❯ so there was no difference in cpu usage between recompiling at runtime with JIT vs precompiling powerpc instructions beforehand?
+
+● Good question, and the answer has an important nuance — let me check the data rather than just assert it.
+
+● Bash(cd /home/christopher/dolphin-perf
+      echo "=== Any RUNTIME COMPILATION cost visible? (Jit/Compile/Emit symbols, whole process) ==="…)
+  ⎿  === Any RUNTIME COMPILATION cost visible? (Jit/Compile/Emit symbols, whole process) ===
+     --- aot-unc ---
+          0.37%  [.] JitInterface::CompileExceptionCheck(JitInterface::ExceptionType)
+     … +63 lines (ctrl+o to expand)
+
+● Right — in the 30-second steady-state windows I measured, correct: no meaningful CPU-usage difference (within a couple percent, inside the noise floor). But that result is expected, and the data explains why — it's not that the two
+  are magically the same, it's that my measurement caught the one regime where they're supposed to converge.
+
+  The key distinction: AOT vs JIT differ in when translation happens, not in what runs
+
+  Both backends produce and execute the same kind of translated x86 code. The difference is timing:
+  - JIT translates each PowerPC block the first time it's hit, then caches it. After that, it runs from the cache.
+  - AOT front-loads that translation so the blocks are ready before execution.
+
+  Once a block is compiled, both run identical cached machine code. So in steady state — same scene, hot blocks already compiled — there's nothing left to differentiate them.
+
+  The profile proves this directly
+
+  I grepped both uncapped runs for the recompiler's compilation functions (Jit64::DoJit, FinalizeBlock, EmitStore, SafeLoadToReg):
+
+  ┌──────────────────────────────────┬─────────────┬─────────────┐
+  │                                  │   AOT-unc   │   JIT-unc   │
+  ├──────────────────────────────────┼─────────────┼─────────────┤
+  │ Jit64::DoJit (block compilation) │ 0.02%       │ 0.02%       │
+  ├──────────────────────────────────┼─────────────┼─────────────┤
+  │ CompileExceptionCheck            │ 0.37%       │ 0.29%       │
+  ├──────────────────────────────────┼─────────────┼─────────────┤
+  │ emit/finalize/blockcache         │ <0.05% each │ <0.05% each │
+  ├──────────────────────────────────┼─────────────┼─────────────┤
+  │ total runtime-compilation cost   │ <1%         │ <1%         │
+  └──────────────────────────────────┴─────────────┴─────────────┘
+
+  Two things fall out of this:
+  1. Runtime compilation was near-zero in both — by the time I profiled, the JIT had already compiled every hot block for that scene (that happens within seconds of entering it), so it was effectively running as AOT for my whole window.
+  Nothing left to compile → identical CPU.
+  2. Even the "AOT" run shows Jit64::DoJit and the Jit64 emitter symbols. So this build's AOT still uses the same Jit64 code generator and still compiles on demand for anything not already cached — the AOT/JIT difference here is whether
+  the block cache is pre-populated, not a different execution engine. That's exactly why steady-state execution is identical.
+
+  Where the difference actually lives — and why I didn't capture it
+
+  AOT's payoff is in compilation transients, not steady state:
+  - game boot / loading a level
+  - entering a new area, a cutscene, a new visual effect — anything that hits cold PowerPC code
+
+  At those moments JIT has to compile a burst of new blocks, which shows up as short CPU spikes and frame-time stutter/hitches. AOT pays that cost ahead of time, so it stays smooth. My methodology — 30s parked in one steady scene —
+  deliberately sat between those transitions, so both looked identical. That's the measurement's blind spot, not a property of the emulator.
+
+  So the honest answer
+
+  - Steady-state CPU usage: no difference — and that's the expected, correct result.
+  - Transient CPU spikes / stutter on new code: that's where AOT should win, and I haven't measured it yet.
+
+  If you want to actually see AOT's benefit, the right experiment is to profile across a boot or an area transition and compare the compilation burst (I can watch Jit64::DoJit cost and frame-time hitching during that window). Want me to
+  set that up? That's the test that would show a real AOT-vs-JIT difference.
+
+✻ Cooked for 1m 30s
+
+───────────────────────────────────────────────────
