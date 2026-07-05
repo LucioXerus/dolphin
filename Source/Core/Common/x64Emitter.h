@@ -229,6 +229,8 @@ private:
   void WriteREX(XEmitter* emit, int opBits, int bits, int customOp = -1) const;
   void WriteVEX(XEmitter* emit, X64Reg regOp1, X64Reg regOp2, int L, int pp, int mmmmm,
                 int W = 0) const;
+  void WriteEVEX(XEmitter* emit, X64Reg regOp1, X64Reg regOp2, int L, int pp, int mmmmm,
+                 int W = 0, int z = 0, int b = 0) const;
   void WriteRest(XEmitter* emit, int extraBytes = 0, X64Reg operandReg = INVALID_REG,
                  bool warn_64bit_offset = true) const;
   void WriteSingleByteOp(XEmitter* emit, u8 op, X64Reg operandReg, int bits);
@@ -363,6 +365,8 @@ private:
                   int extrabytes = 0);
   void WriteAVXOp4(u8 opPrefix, u16 op, X64Reg regOp1, X64Reg regOp2, const OpArg& arg,
                    X64Reg regOp3, int W = 0);
+  void WriteAVX512Op(u8 opPrefix, u16 op, X64Reg regOp1, X64Reg regOp2, const OpArg& arg, int W = 0,
+                     int extrabytes = 0);
   void WriteFMA3Op(u8 op, X64Reg regOp1, X64Reg regOp2, const OpArg& arg, int W = 0);
   void WriteFMA4Op(u8 op, X64Reg dest, X64Reg regOp1, X64Reg regOp2, const OpArg& arg, int W = 0);
   void WriteBMIOp(int size, u8 opPrefix, u16 op, X64Reg regOp1, X64Reg regOp2, const OpArg& arg,
@@ -886,6 +890,11 @@ public:
   void VMOVAPS(const OpArg& arg, X64Reg regOp);
 
   void VZEROUPPER();
+
+  // AVX-512 instructions (EVEX-encoded, require cpu_info.bAVX512F)
+  // Bitwise ternary logic: dest = truth_table_imm8(dest, src1, src2).
+  void VPTERNLOGD(X64Reg regOp1, X64Reg regOp2, const OpArg& arg, u8 imm8);
+  void VPTERNLOGQ(X64Reg regOp1, X64Reg regOp2, const OpArg& arg, u8 imm8);
 
   // FMA3
   void VFMADD132PS(X64Reg regOp1, X64Reg regOp2, const OpArg& arg);

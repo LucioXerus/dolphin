@@ -269,6 +269,35 @@ void OpArg::WriteVEX(XEmitter* emit, X64Reg regOp1, X64Reg regOp2, int L, int pp
   }
 }
 
+void OpArg::WriteEVEX(XEmitter* emit, X64Reg regOp1, X64Reg regOp2, int L, int pp, int mmmmm,
+                      int W, int z, int b) const
+{
+  // EVEX is a 4-byte prefix:
+  //   P0 (byte1): [R][X][B][R'][0][0][m][m]   R/X/B/R' are inverted reg-extension bits,
+  //                                           mm is the 2-bit opcode map (1=0F, 2=0F38, 3=0F3A)
+  //   P1 (byte2): [W][v][v][v][v][1][p][p]    vvvv is the inverted NDS register, pp the SIMD prefix
+  //   P2 (byte3): [z][L'][L][b][V'][a][a][a]  L'L the vector length, V' the inverted NDS reg bit4,
+  //                                           z the zeroing bit, b broadcast/RC/SAE, aaa the opmask
+  // Only registers 0-15 are modeled here (R'/V' are the inverted bit-4, i.e. 1 for regs 0-15).
+  const int R = !(regOp1 & 8);
+  const int Rp = !(regOp1 & 16);
+  const int X = !(indexReg & 8);
+  const int B = !(offsetOrBaseReg & 8);
+  const u8 vvvv = (regOp2 == X64Reg::INVALID_REG) ? 0xF : static_cast<u8>(regOp2 ^ 0xF);
+  const int Vp = (regOp2 == X64Reg::INVALID_REG) ? 1 : !(regOp2 & 16);
+  const int LL = L;  // L'L bits: 0=XMM(128), 1=YMM(256), 2=ZMM(512), 3=reserved
+
+  const u8 byte0 = 0x62;
+  const u8 byte1 = (R << 7) | (X << 6) | (B << 5) | (Rp << 4) | (mmmmm & 0x3);
+  const u8 byte2 = (W << 7) | ((vvvv & 0xF) << 3) | (1 << 2) | (pp & 0x3);
+  const u8 byte3 = (z << 7) | (LL << 5) | (b << 4) | (Vp << 3);
+
+  emit->Write8(byte0);
+  emit->Write8(byte1);
+  emit->Write8(byte2);
+  emit->Write8(byte3);
+}
+
 void OpArg::WriteRest(XEmitter* emit, int extraBytes, X64Reg _operandReg,
                       bool warn_64bit_offset) const
 {
@@ -1882,6 +1911,24 @@ void XEmitter::WriteAVXOp4(u8 opPrefix, u16 op, X64Reg regOp1, X64Reg regOp2, co
   WriteVEXOp4(opPrefix, op, regOp1, regOp2, arg, regOp3, W);
 }
 
+static void CheckAVX512Support()
+{
+  if (!cpu_info.bAVX512F)
+    PanicAlertFmt("Trying to use AVX-512 on a system that doesn't support it. Bad programmer.");
+}
+
+void XEmitter::WriteAVX512Op(u8 opPrefix, u16 op, X64Reg regOp1, X64Reg regOp2, const OpArg& arg,
+                             int W, int extrabytes)
+{
+  CheckAVX512Support();
+  int mmmmm = GetVEXmmmmm(op);
+  int pp = GetVEXpp(opPrefix);
+  int L = (regOp1 & 0x200) ? 2 : (regOp1 & 0x100) ? 1 : 0;
+  arg.WriteEVEX(this, regOp1, regOp2, L, pp, mmmmm, W);
+  Write8(op & 0xFF);
+  arg.WriteRest(this, extrabytes, regOp1);
+}
+
 void XEmitter::WriteFMA3Op(u8 op, X64Reg regOp1, X64Reg regOp2, const OpArg& arg, int W)
 {
   if (!cpu_info.bFMA)
@@ -3060,6 +3107,20 @@ void XEmitter::VZEROUPPER()
   Write8(0xC5);
   Write8(0xF8);
   Write8(0x77);
+}
+
+// VPTERNLOGD/Q: bitwise ternary logic. dest = f(dest, src1, src2) where f is the 256-entry
+// truth table selected by imm8 (bit n of imm8 = output for input combination n = dest:src1:src2).
+// EVEX.128.66.0F3A.W0 25 /r ib (D) and .W1 25 /r ib (Q). dest = ModRM.reg, src1 = vvvv, src2 = rm.
+void XEmitter::VPTERNLOGD(X64Reg regOp1, X64Reg regOp2, const OpArg& arg, u8 imm8)
+{
+  WriteAVX512Op(0x66, 0x3A25, regOp1, regOp2, arg, 0);
+  Write8(imm8);
+}
+void XEmitter::VPTERNLOGQ(X64Reg regOp1, X64Reg regOp2, const OpArg& arg, u8 imm8)
+{
+  WriteAVX512Op(0x66, 0x3A25, regOp1, regOp2, arg, 1);
+  Write8(imm8);
 }
 
 void XEmitter::VFMADD132PS(X64Reg regOp1, X64Reg regOp2, const OpArg& arg)

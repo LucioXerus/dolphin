@@ -188,12 +188,33 @@ void CPUInfo::Detect()
     //  - XGETBV result has the XCR bit set.
     if (((info.ecx >> 28) & 1) && ((info.ecx >> 27) & 1))
     {
-      // Check that XSAVE can be used for SSE and AVX
-      if ((xgetbv(XCR_XFEATURE_ENABLED_MASK) & 0b110) == 0b110)
+      // Check that XSAVE can be used for SSE and AVX. For AVX-512 we additionally need the
+      // OS to have enabled the opmask state (bit 5), ZMM_Hi256 (bit 6) and Hi16_ZMM (bit 7).
+      const u64 xcr0 = xgetbv(XCR_XFEATURE_ENABLED_MASK);
+      if ((xcr0 & 0b110) == 0b110)
       {
         bAVX = true;
         if ((info.ecx >> 12) & 1)
           bFMA = true;
+
+        // AVX2 and AVX-512 detection live in leaf 7 sub-leaf 0. AVX2 reuses the same XSAVE
+        // state as AVX (low 256 bits), so it's gated by the same XCR0 bits; AVX-512 additionally
+        // requires opmask/ZMM_Hi256/Hi16_ZMM (bits 5..7).
+        if (func_id_max >= 7)
+        {
+          const CPUIDResult leaf7 = cpuid(7);
+          if ((leaf7.ebx >> 5) & 1)
+            bAVX2 = true;
+          if ((leaf7.ebx >> 16) & 1 && (xcr0 & 0b11100000) == 0b11100000)  // AVX512F + OS support
+          {
+            bAVX512F = true;
+            bAVX512VL = (leaf7.ebx >> 31) & 1;     // AVX512VL
+            bAVX512DQ = (leaf7.ebx >> 17) & 1;    // AVX512DQ
+            bAVX512BW = (leaf7.ebx >> 30) & 1;    // AVX512BW
+            bAVX512CD = (leaf7.ebx >> 28) & 1;    // AVX512CD
+            bAVX512VBMI2 = (leaf7.ecx >> 6) & 1;  // AVX512_VBMI2
+          }
+        }
       }
     }
 
@@ -260,6 +281,20 @@ std::string CPUInfo::Summarize()
     sum.push_back("HTT");
   if (bAVX)
     sum.push_back("AVX");
+  if (bAVX2)
+    sum.push_back("AVX2");
+  if (bAVX512F)
+    sum.push_back("AVX512F");
+  if (bAVX512VL)
+    sum.push_back("AVX512VL");
+  if (bAVX512DQ)
+    sum.push_back("AVX512DQ");
+  if (bAVX512BW)
+    sum.push_back("AVX512BW");
+  if (bAVX512CD)
+    sum.push_back("AVX512CD");
+  if (bAVX512VBMI2)
+    sum.push_back("AVX512VBMI2");
   if (bBMI1)
     sum.push_back("BMI1");
   if (bBMI2)

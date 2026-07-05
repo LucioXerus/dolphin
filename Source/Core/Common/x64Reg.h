@@ -90,6 +90,24 @@ enum X64Reg
   YMM14,
   YMM15,
 
+  // Use the bit 0x200 to distinguish ZMM registers (AVX-512, EVEX-encoded with L'L = 10).
+  ZMM0 = 0x200,
+  ZMM1,
+  ZMM2,
+  ZMM3,
+  ZMM4,
+  ZMM5,
+  ZMM6,
+  ZMM7,
+  ZMM8,
+  ZMM9,
+  ZMM10,
+  ZMM11,
+  ZMM12,
+  ZMM13,
+  ZMM14,
+  ZMM15,
+
   INVALID_REG = 0xFFFFFFFF
 };
 

@@ -30,6 +30,7 @@ struct CPUInfo
   bool bSSE4_2 = false;
   bool bLZCNT = false;
   bool bAVX = false;
+  bool bAVX2 = false;
   bool bBMI1 = false;
   bool bBMI2 = false;
   // PDEP and PEXT are ridiculously slow on AMD Zen1, Zen1+ and Zen2 (Family 17h)
@@ -38,6 +39,15 @@ struct CPUInfo
   bool bFMA4 = false;
   bool bAES = false;
   bool bMOVBE = false;
+  // AVX-512 feature groups. Empty on parts that don't expose AVX-512F (x86-64-v4).
+  // Detection requires CPUID leaf 7 sub-leaf 0 and an XGETBV result indicating that
+  // the OS has enabled both ZMM_Hi256 + the opmask state (XCR0 bits 5,6,7).
+  bool bAVX512F = false;
+  bool bAVX512VL = false;
+  bool bAVX512DQ = false;
+  bool bAVX512BW = false;
+  bool bAVX512CD = false;
+  bool bAVX512VBMI2 = false;
   // This flag indicates that the hardware supports some mode
   // in which denormal inputs _and_ outputs are automatically set to (signed) zero.
   bool bFlushToZero = false;

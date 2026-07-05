@@ -116,6 +116,8 @@ protected:
     cpu_info.bCRC32 = true;
     cpu_info.bSHA1 = true;
     cpu_info.bSHA2 = true;
+    cpu_info.bAVX2 = true;
+    cpu_info.bAVX512F = true;
 
     emitter.reset(new X64CodeBlock());
     emitter->AllocCodeSpace(4096);
@@ -1362,6 +1364,32 @@ FMA4_TEST(VFNMSUB, P, true)
 FMA4_TEST(VFNMSUB, S, false)
 FMA4_TEST(VFMADDSUB, P, true)
 FMA4_TEST(VFMSUBADD, P, true)
+
+// AVX-512 EVEX-encoded instructions. The bundled Bochs disassembler cannot decode EVEX, so these
+// are validated against hand-derived golden bytes rather than ExpectDisassembly. The canonical
+// reference is `vpternlogd xmm0, xmm1, xmm2, 0x96` == 62 F3 75 08 25 C2 96
+// (EVEX.128.66.0F3A.W0 25 /r ib).
+TEST_F(x64EmitterTest, VPTERNLOGD)
+{
+  // Reference encoding, low registers.
+  emitter->VPTERNLOGD(XMM0, XMM1, R(XMM2), 0x96);
+  ExpectBytes({0x62, 0xF3, 0x75, 0x08, 0x25, 0xC2, 0x96});
+
+  // High registers exercise the R (dest bit3), B (rm bit3) and vvvv (src1) fields.
+  emitter->VPTERNLOGD(XMM8, XMM9, R(XMM10), 0x12);
+  ExpectBytes({0x62, 0x53, 0x35, 0x08, 0x25, 0xC2, 0x12});
+
+  // Memory source operand ([rax]) — mod=00, reg=xmm1, rm=rax.
+  emitter->VPTERNLOGD(XMM1, XMM2, MatR(RAX), 0x30);
+  ExpectBytes({0x62, 0xF3, 0x6D, 0x08, 0x25, 0x08, 0x30});
+}
+
+TEST_F(x64EmitterTest, VPTERNLOGQ)
+{
+  // Same as VPTERNLOGD but with EVEX.W1, which flips bit 7 of the third prefix byte.
+  emitter->VPTERNLOGQ(XMM0, XMM1, R(XMM2), 0x96);
+  ExpectBytes({0x62, 0xF3, 0xF5, 0x08, 0x25, 0xC2, 0x96});
+}
 
 }  // namespace Gen
 

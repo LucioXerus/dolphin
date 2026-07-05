@@ -409,9 +409,18 @@ void CommonAsmRoutines::GeneratePsMaddEft()
   PSHUFD(XMM0, R(XMM0), 0xF5);
   POR(XMM0, MConst(double_lsb));
 
-  // Round the elements that have both a non-zero error and an even tie
-  PANDN(XMM2, R(XMM3));
-  PAND(XMM0, R(XMM2));
+  // Round the elements that have both a non-zero error and an even tie.
+  // XMM0 = XMM0 & ~XMM2 & XMM3 (XMM2 is dead afterwards).
+  if (cpu_info.bAVX512F)
+  {
+    // Single-op fused bitwise: truth table 0x20 == "a & ~b & c" for (a,b,c) = (XMM0,XMM2,XMM3).
+    VPTERNLOGD(XMM0, XMM2, R(XMM3), 0x20);
+  }
+  else
+  {
+    PANDN(XMM2, R(XMM3));
+    PAND(XMM0, R(XMM2));
+  }
   PADDQ(XMM1, R(XMM0));
   RET();
 }
